@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
+
+#python merge_tifs_subset.py \
+#../tifs_2022_2025 \
+#../mosaics_2022_2025 \
+#--wkt "POLYGON ((-117.35 32.4, -117.08 32.4, -117.08 32.75, -117.35 32.75, -117.35 32.4))"
+
 from __future__ import annotations
 
 import re
+import time
 from pathlib import Path
 from collections import defaultdict
 
@@ -140,6 +147,19 @@ def main(in_dir: str, out_dir: str, polygon_wkt: str, pattern: str = "*.tif") ->
 
     for dt, paths in sorted(groups.items()):
         out_file = out_path / f"mosaic_{dt}_clipped.tif"
+
+        if out_file.exists():
+            file_mtime = out_file.stat().st_mtime
+            current_time = time.time()
+            
+            # Check if the file was modified in the last 24 hours (86400 seconds).
+            # If you started this run 2 days ago, change it to 172800.
+            if (current_time - file_mtime) < 86400:
+                print(f"Skipping {dt}, recently updated file already exists.")
+                continue
+            else:
+                print(f"Overwriting old file for {dt}...")
+                
         print(f"\nMerging {len(paths)} tiles for {dt} -> clip -> {out_file}")
         mosaic_and_clip_group(paths, out_file, polygon_wkt)
 

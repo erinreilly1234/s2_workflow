@@ -6,7 +6,7 @@ xargs -0 -n 1 -P 4 bash -c '
   product="${safe_dir%.SAFE}"
   granule=$(echo "$i" | sed -n "s#.*/GRANULE/\([^/]*\)/IMG_DATA/.*#\1#p")
 
-  outdir="$HOME/s2/tifs_2024"
+  outdir="$HOME/s2/tifs_2022_2025"
   mkdir -p "$outdir"
 
   outfile="$outdir/${product}_${granule}_L2A_e.tif"
