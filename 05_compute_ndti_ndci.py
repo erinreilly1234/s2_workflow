@@ -15,9 +15,9 @@ from pathlib import Path
 import numpy as np
 import rasterio
 
-input_dir = Path("/home/jovyan/s2/mosaics_2022_2025_reflectance")
-ndti_dir = Path("/home/jovyan/s2/06_NDTI")
-ndci_dir = Path("/home/jovyan/s2/06_NDCI")
+input_dir = Path("/home/jovyan/s2/03_mosaics_2022_2025_reflectance")
+ndti_dir = Path("/home/jovyan/s2/05_NDTI")
+ndci_dir = Path("/home/jovyan/s2/05_NDCI")
 ndti_dir.mkdir(parents=True, exist_ok=True)
 ndci_dir.mkdir(parents=True, exist_ok=True)
 
@@ -47,7 +47,7 @@ for src_path in sorted(input_dir.glob("*.tif")):
         profile = src.profile
 
     ndwi = normalized_difference(green, nir)
-    land = ~(ndwi >= NDWI_THRESHOLD)   # NDWI < 0.1, plus NaN/NoData pixels
+    land = ~(ndwi >= NDWI_THRESHOLD)   # NDWI < 0.01, plus NaN/NoData pixels
 
     ndti = normalized_difference(red, green)
     ndci = normalized_difference(b05, red)
