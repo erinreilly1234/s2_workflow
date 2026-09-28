@@ -4,6 +4,15 @@ Convert Sentinel-2 L2A mosaics from DN to BOA reflectance.
     reflectance = (DN + BOA_ADD_OFFSET) / BOA_QUANTIFICATION_VALUE
 
 Values from MTD_MSIL2A.xml (processing baseline 05.10).
+
+Note on the January 2022 change: ESA introduced BOA_ADD_OFFSET = -1000 with
+processing baseline 04.00 (operational from 25 Jan 2022). Products still on
+baseline 03.xx have no offset. The scenes used here come from the reprocessed
+Collection-1 archive (baseline >= 05.00), which applies the offset to every
+date, including acquisitions before 25 Jan 2022, so the offset is applied to
+all files. Check: DN offset data has a floor near 1000 over dark water; if
+you mix in any baseline 03.xx products, set OFFSET = 0.0 for those.
+
 Output keeps the input filename; NoData pixels (DN 0) become NaN.
 """
 
