@@ -1,2 +1,10 @@
-06_histogram_plumes_turbidity.py
+# Local archive of old scripts (kept on disk, not on GitHub)
+_archive/
 archive/
+
+# macOS metadata files created on external drives
+._*
+.DS_Store
+
+# Unused test script
+06_histogram_plumes_turbidity.py
