@@ -1,5 +1,5 @@
 """
-Compute NDTI and NDCI over water from Sentinel-2 reflectance mosaics.
+Compute NDTI, NDCI and turbidity (FNU) over water from Sentinel-2 reflectance mosaics.
 
 Run after dn_to_reflectance.py.
 
@@ -8,6 +8,18 @@ Run after dn_to_reflectance.py.
                                            applied to every date; other pixels -> NaN
     NDTI = (B04 - B03) / (B04 + B03)    turbidity
     NDCI = (B05 - B04) / (B05 + B04)    chlorophyll
+    T    = A * rho / (1 - rho / C)      turbidity in FNU, rho = B04 (665 nm)
+                                        A = 610.94, C = 0.2324: Sentinel-2 665 nm coefficients,
+                                        Nechad et al. (2016), ESA Living Planet Symposium, Table 3
+                                        (B = 0). Pixels with rho < 0 or rho >= C
+                                        (formula undefined / saturated, e.g. cloud) -> NaN.
+
+Note: rho here is Sen2Cor L2A surface reflectance, used as an approximation of
+water-leaving reflectance (rho_w). Sen2Cor is a land-oriented correction, so
+glint/haze residuals feed straight into T. A and C are wavelength-specific.
+Earlier versions used A = 247.10, C = 0.1697 (Nechad et al., 2009, at 657.5 nm,
+the RapidEye red band); ACOLITE's Sentinel-2 B4 calibration is A = 366.14,
+C = 0.19563.
 
 Band order assumed in the mosaics: 2 = B02, 3 = B03, 4 = B04, 5 = B05, 8 = B08.
 
@@ -25,11 +37,23 @@ import rasterio
 input_dir = Path("/home/jovyan/s2/03_mosaics_2022_2025_reflectance")
 ndti_dir = Path("/home/jovyan/s2/05_NDTI")
 ndci_dir = Path("/home/jovyan/s2/05_NDCI")
-ndti_dir.mkdir(parents=True, exist_ok=True)
-ndci_dir.mkdir(parents=True, exist_ok=True)
+turb_dir = Path("/home/jovyan/s2/05_TURB")
+for d in (ndti_dir, ndci_dir, turb_dir):
+    d.mkdir(parents=True, exist_ok=True)
 
 NDWI_THRESHOLD = 0.01
 WATER_MASK_DATE = "20240825"   # clear, cloud-free reference scene
+
+TURB_A = 610.94    # Nechad et al. (2016) Table 3, Sentinel-2 665 nm (B04)
+TURB_C = 0.2324
+
+
+def nechad_turbidity(rho):
+    """Turbidity (FNU) from red reflectance; NaN where rho < 0 or rho >= C."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = TURB_A * rho / (1.0 - rho / TURB_C)
+    t[(rho < 0) | (rho >= TURB_C)] = np.nan
+    return t
 
 
 def normalized_difference(a, b):
@@ -51,8 +75,9 @@ with rasterio.open(ndti_dir.parent / f"water_mask_{WATER_MASK_DATE}.tif", "w", *
 for src_path in sorted(input_dir.glob("*.tif")):
     ndti_path = ndti_dir / src_path.name.replace("_reflectance.tif", "_NDTI.tif")
     ndci_path = ndci_dir / src_path.name.replace("_reflectance.tif", "_NDCI.tif")
+    turb_path = turb_dir / src_path.name.replace("_reflectance.tif", "_TURB.tif")
 
-    if ndti_path.exists() and ndci_path.exists():
+    if ndti_path.exists() and ndci_path.exists() and turb_path.exists():
         print(f"Skipping {src_path.name} (already done)")
         continue
 
@@ -71,8 +96,10 @@ for src_path in sorted(input_dir.glob("*.tif")):
 
     ndti = normalized_difference(red, green)
     ndci = normalized_difference(b05, red)
+    turb = nechad_turbidity(red)
     ndti[land] = np.nan
     ndci[land] = np.nan
+    turb[land] = np.nan
 
     profile.update(count=1, dtype="float32", nodata=np.nan, compress="deflate")
 
@@ -81,5 +108,8 @@ for src_path in sorted(input_dir.glob("*.tif")):
 
     with rasterio.open(ndci_path, "w", **profile) as dst:
         dst.write(ndci.astype("float32"), 1)
+
+    with rasterio.open(turb_path, "w", **profile) as dst:
+        dst.write(turb.astype("float32"), 1)
 
 print("Done.")
