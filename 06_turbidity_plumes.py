@@ -1,7 +1,7 @@
 """
 06_turbidity_plumes.py
 
-Run after 05_compute_ndti_ndci.py (uses the *_TURB.tif turbidity rasters, in FNU).
+Run after 05_compute_turbidity.py (uses the *_TURB.tif turbidity rasters, in FNU).
 
 Same steps as 06_isegprob_ndti_926_2.py, applied to turbidity:
   1. smooth turbidity (low-pass filter that ignores NaN / land pixels)

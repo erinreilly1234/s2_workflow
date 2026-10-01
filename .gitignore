@@ -8,3 +8,6 @@ archive/
 
 # Unused test script
 06_histogram_plumes_turbidity.py
+
+# Python bytecode
+__pycache__/

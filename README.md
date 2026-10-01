@@ -3,7 +3,7 @@
 <img width="200" height="400" alt="image" src="https://github.com/user-attachments/assets/641d18f3-4dce-44ad-b5d0-2a4f4a45f009" />
 
 Downloads Sentinel-2 L2A scenes, mosaics and clips them to the study area,
-converts them to surface reflectance, computes water-quality indices (NDTI, NDCI),
+converts them to surface reflectance, computes turbidity (FNU, Nechad),
 checks them with QC figures, and segments turbid plumes near outfalls.
 
 Scripts run in order. Paths are set near the top of each script and assume the
@@ -17,8 +17,8 @@ Scripts run in order. Paths are set near the top of each script and assume the
 | 02 | `02_merge_SAFEtoTIF.sh` | `.SAFE` folders → `tifs_2022_2025/` | Stacks 11 bands of each granule into one GeoTIFF (UInt16 DN, 20 m bands + 10 m bands). Run from the folder that contains the `.SAFE` products. |
 | 03 | `03_merge_tifs_subset.py` | `tifs_2022_2025/` → `mosaics_2022_2025/` | Mosaics granules from the same acquisition time and clips them to a lon/lat polygon. Output: `mosaic_<YYYYMMDDTHHMMSS>_clipped.tif`. |
 | 04 | `04_dn_to_reflectance.py` | mosaics → `03_mosaics_2022_2025_reflectance/` | DN → bottom-of-atmosphere reflectance: `(DN − 1000) / 10000`. NoData (DN 0) → NaN. |
-| 05 | `05_compute_ndti_ndci.py` | reflectance → `05_NDTI/`, `05_NDCI/`, `05_TURB/`, `water_mask_<date>.tif` | Computes NDTI, NDCI and turbidity (FNU) over water using one fixed water mask (see below). |
-| 05b | `05b_qc_figures.py` | reflectance + NDTI → `06_QC/` | QC figures per date (true colour, spectral profiles at two points, NDTI map and histogram), an all-dates overview and `QC_stats.csv`. |
+| 05 | `05_compute_turbidity.py` | reflectance → `05_TURB/`, `water_mask_<date>.tif` | Computes Nechad turbidity (FNU) over water using one fixed water mask (see below). The earlier version that also wrote `05_NDTI/` and `05_NDCI/` is `_archive/05_compute_ndti_ndci_full.py`. |
+| 05b | `05b_qc_figures.py` | reflectance + NDTI (from `_archive/05_compute_ndti_ndci_full.py`) → `06_QC/` | QC figures per date (true colour, spectral profiles at two points, NDTI map and histogram), an all-dates overview and `QC_stats.csv`. |
 | 06 | `06_turbidity_plumes.py` | `05_TURB/` → `06_TURB_plumes/` | Main plume step: smooths turbidity, thresholds at 10 FNU, cleans the mask with morphology, and keeps clusters near the outfalls (`shapefiles/Outflow.shp`; exp(−d / 4000 m) ≥ 0.7, i.e. within ~1.4 km). Writes `_TURB_mask.tif`, `_TURB_prob.tif` and a 6-panel QC figure per date. |
 | 06 (older) | `06_isegprob_ndti*.py`, `06_isegprob_ndti_tuning.ipynb` | NDTI → plume masks | Earlier NDTI-based versions of the same segmentation. |
 
@@ -43,7 +43,8 @@ Created in step 02 and assumed by every later step (1-based, as read by rasterio
 
 - **NDWI** = (B03 − B08) / (B03 + B08). Used only to build the water mask (water = NDWI ≥ 0.01).
 - **NDTI** = (B04 − B03) / (B04 + B03). Turbidity: sediment raises red, so higher = more turbid.
-- **NDCI** = (B05 − B04) / (B05 + B04). Chlorophyll.
+  (archived script only)
+- **NDCI** = (B05 − B04) / (B05 + B04). Chlorophyll. (archived script only)
 - **Turbidity (FNU)** = A·ρ / (1 − ρ/C), ρ = B04 reflectance, with the Sentinel-2 665 nm
   coefficients of Nechad et al. (2016, ESA Living Planet Symposium, Table 3):
   A = 610.94, C = 0.2324 (B = 0). Pixels with ρ < 0 or ρ ≥ C are left blank.
