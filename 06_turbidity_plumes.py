@@ -13,12 +13,23 @@ Same steps as 06_isegprob_ndti_926_2.py, applied to turbidity:
   6. label clusters; each cluster gets the highest probability inside it;
      keep clusters with probability >= cluster_prob_threshold
 Outputs per scene: plume mask (_TURB_mask.tif), cluster probability map
-(_TURB_prob.tif) and a 6-panel QC figure (qc_pngs/).
+(_TURB_prob.tif) and a 6-panel QC figure (qc_pngs/). QC figures are made only
+for S2 dates rated 3 (cloud-free) in RATINGS_CSV when QC_RATING_3_ONLY is True.
+
+QC panel 1 colours pixels that have no turbidity value, using the red reflectance
+from step 04 and the water mask from step 05:
+  above the scale (magenta): turbidity > the colour-scale maximum, or red reflectance
+                             >= C (too bright for the formula: cloud, sun glint, haze)
+  below the scale (black):   red reflectance < 0 (very dark water, over-corrected)
+  grey:                      land / outside the water mask / no data
 """
 
 from pathlib import Path
 
+import re
+
 import numpy as np
+import pandas as pd
 import rasterio
 import geopandas as gpd
 from rasterio.features import rasterize
@@ -28,12 +39,18 @@ from skimage.morphology import (binary_opening, binary_closing, binary_dilation,
 import matplotlib
 matplotlib.use('Agg')  # write PNGs without needing a display
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 
 # --- Parameters ---
 input_dir = Path('/home/jovyan/s2/05_TURB')              # turbidity output of step 05
 output_dir = Path('/home/jovyan/s2/06_TURB_plumes')
 qc_dir = output_dir / 'qc_pngs'
 outfall_shapefile = '/home/jovyan/s2/shapefiles/Outflow.shp'
+reflectance_dir = Path('/home/jovyan/s2/03_mosaics_2022_2025_reflectance')   # step 04 output
+water_mask_path = Path('/home/jovyan/s2/water_mask_20240825.tif')           # step 05 output
+RATINGS_CSV = Path('/home/jovyan/s2/all_s1_s2_dates_for_rating.csv')
+QC_RATING_3_ONLY = True        # QC figures only for S2 dates rated 3 (cloud-free)
+TURB_C = 0.2324                # same C as step 05 (red reflectance >= C has no turbidity)
 
 threshold = 10.0               # turbidity (FNU) at or above this counts as turbid water
                                # (Nechad 2016 S2 coefficients from step 05; ~ the old 4 FNU)
@@ -113,10 +130,49 @@ def process_image(image_path, mask_path, prob_path, qc_path):
     print(f'  plume area: {area_km2:.2f} km2 ({n_accepted} of {n_clusters} clusters kept)')
 
     # 8. QC figure (6 panels, same layout as the NDTI scripts)
+    if qc_path is None:
+        return
     ys, xs = np.where(outfall_r == 1)
     fig, axes = plt.subplots(2, 3, figsize=(16, 10))
-    axes[0, 0].imshow(turb, cmap='viridis', vmin=0, vmax=3 * threshold)
-    axes[0, 0].set_title(f'1. Turbidity (FNU, colour scale 0-{3 * threshold:g})')
+
+    # Panel 1: turbidity, with pixels that have no value shown as above / below the scale
+    vmax = 3 * threshold
+    disp = turb.copy()
+    water = np.zeros(turb.shape, dtype=bool)
+    if water_mask_path.exists():
+        with rasterio.open(water_mask_path) as src:
+            wm = src.read(1)
+        if wm.shape == turb.shape:
+            water = wm == 1
+    stem = image_path.name.replace('_TURB.tif', '')
+    refl_path = reflectance_dir / f'{stem}_reflectance.tif'
+    below = above_sat = np.zeros(turb.shape, dtype=bool)
+    if refl_path.exists() and water.any():
+        with rasterio.open(refl_path) as src:
+            red = src.read(4)
+        if red.shape == turb.shape:
+            below = water & (red < 0)                 # very dark / over-corrected water
+            above_sat = water & (red >= TURB_C)       # too bright: cloud, glint, haze
+    disp[below] = -1.0                                # shown in the 'under' colour
+    disp[above_sat] = vmax * 10                       # shown in the 'over' colour
+    n_water = max(water.sum(), 1)
+    pct_over = 100 * (water & (np.nan_to_num(turb) > vmax)).sum() / n_water
+    pct_sat = 100 * above_sat.sum() / n_water
+    pct_below = 100 * below.sum() / n_water
+
+    cmap = plt.cm.viridis.copy()
+    cmap.set_under('black')
+    cmap.set_over('#ff3bd3')
+    cmap.set_bad('#d9d9d9')
+    im1 = axes[0, 0].imshow(disp, cmap=cmap, vmin=0, vmax=vmax, interpolation='nearest')
+    fig.colorbar(im1, ax=axes[0, 0], fraction=0.046, extend='both', label='Turbidity (FNU)')
+    axes[0, 0].legend(handles=[
+        Patch(color='#ff3bd3', label=f'above scale: > {vmax:g} FNU ({pct_over:.1f}% of water)\n'
+                                     f'or too bright, cloud/glint/haze ({pct_sat:.1f}%)'),
+        Patch(color='black', label=f'below scale: red reflectance < 0 ({pct_below:.1f}%)'),
+        Patch(color='#d9d9d9', label='land / no data'),
+    ], loc='lower left', fontsize=7, framealpha=0.9)
+    axes[0, 0].set_title(f'1. Turbidity (FNU, colour scale 0-{vmax:g})')
     axes[0, 1].imshow(signal, cmap='gray')
     axes[0, 1].set_title(f'2. Turbidity >= {threshold:g} FNU\n{signal.sum():,} px')
     axes[0, 2].imshow(mask, cmap='gray')
@@ -140,16 +196,29 @@ def process_image(image_path, mask_path, prob_path, qc_path):
     plt.close(fig)
 
 
+def rated_3_keys():
+    """Timestamps (YYYYMMDDTHHMMSS, UTC) of S2 dates rated 3 in RATINGS_CSV."""
+    r = pd.read_csv(RATINGS_CSV)
+    r = r[(r['Sensor'] == 'S2') & (r['Rating'] == 3)]
+    return set(pd.to_datetime(r['Timestamp'], utc=True).dt.strftime('%Y%m%dT%H%M%S'))
+
+
 def main():
     qc_dir.mkdir(parents=True, exist_ok=True)
+    good = rated_3_keys() if QC_RATING_3_ONLY else None
+    if good is not None:
+        print(f'QC figures only for the {len(good)} S2 dates rated 3')
     for src_path in sorted(input_dir.glob('*_TURB.tif')):
         if src_path.name.startswith('._'):     # macOS metadata files on external drives
             continue
         mask_path = output_dir / src_path.name.replace('_TURB.tif', '_TURB_mask.tif')
         prob_path = output_dir / src_path.name.replace('_TURB.tif', '_TURB_prob.tif')
         qc_path = qc_dir / src_path.name.replace('_TURB.tif', '_TURB_qc.png')
+        m = re.search(r'(\d{8}T\d{6})', src_path.name)
+        if good is not None and not (m and m.group(1) in good):
+            qc_path = None                     # not rated 3: no QC figure
 
-        if mask_path.exists() and prob_path.exists() and qc_path.exists():
+        if mask_path.exists() and prob_path.exists() and (qc_path is None or qc_path.exists()):
             print(f'Skipping {src_path.name} (already done)')
             continue
 

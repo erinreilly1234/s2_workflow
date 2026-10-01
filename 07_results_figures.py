@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 S2_DIR = Path("/home/jovyan/s2/06_TURB_plumes")            # *_TURB_mask.tif from step 06
 S1_DIR = Path("/home/jovyan/s2/040_segoutput")             # S1 *_mask.tif
 FLOW_CSV = Path("/home/jovyan/s2/ancillary/Total Flow.Preliminary Daily.US Million Gallons.csv")
-RATINGS_CSV = Path("/home/jovyan/s2/ancillary/all_s1_s2_dates_for_rating.csv")
+RATINGS_CSV = Path("/home/jovyan/s2/all_s1_s2_dates_for_rating.csv")
 PAIRS_CSV = Path("/home/jovyan/s2/ancillary/matched_pairs_reviewed.csv")
 WATER_MASK = Path("/home/jovyan/s2/water_mask_20240825.tif")   # written by step 05
 OUTFALLS = Path("/home/jovyan/s2/shapefiles/Outflow.shp")
