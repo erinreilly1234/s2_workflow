@@ -8,12 +8,12 @@ Same steps as 06_isegprob_ndti_926_2.py, applied to turbidity:
   2. turbidity >= threshold marks turbid water
   3. morphological cleanup: opening, closing, fill small holes,
      remove small patches, dilation
-  4. distance from each pixel to the nearest outfall (meters)
-  5. outfall probability = exp(-distance / decay_scale)
-  6. label clusters; each cluster gets the highest probability inside it;
-     keep clusters with probability >= cluster_prob_threshold
-Outputs per scene: plume mask (_TURB_mask.tif), cluster probability map
-(_TURB_prob.tif) and a 6-panel QC figure (qc_pngs/). QC figures are made only
+  4. clip the cleaned mask to the step 05 water mask (smoothing, closing and
+     dilation can otherwise push it onto land along the coast)
+  5. distance from each pixel to the nearest outfall (meters)
+  6. label clusters (4-connected); keep a cluster if any of its pixels lies
+     within max_outfall_distance_m (1.5 km) of an outfall
+Output per scene: plume mask (_TURB_mask.tif), plus a 6-panel QC figure (qc_pngs/). QC figures are made only
 for S2 dates rated 3 (cloud-free) in RATINGS_CSV when QC_RATING_3_ONLY is True.
 
 QC panel 1 colours pixels that have no turbidity value, using the red reflectance
@@ -33,7 +33,8 @@ import pandas as pd
 import rasterio
 import geopandas as gpd
 from rasterio.features import rasterize
-from scipy.ndimage import uniform_filter, distance_transform_edt, label, maximum
+from scipy.ndimage import uniform_filter, distance_transform_edt, label, minimum
+from rasterio.warp import reproject, Resampling
 from skimage.morphology import (binary_opening, binary_closing, binary_dilation,
                                 remove_small_objects, remove_small_holes, disk)
 import matplotlib
@@ -54,8 +55,7 @@ TURB_C = 0.2324                # same C as step 05 (red reflectance >= C has no 
 
 threshold = 10.0               # turbidity (FNU) at or above this counts as turbid water
                                # (Nechad 2016 S2 coefficients from step 05; ~ the old 4 FNU)
-decay_scale = 4000.0           # distance decay scale (meters)
-cluster_prob_threshold = 0.7   # minimum probability for cluster acceptance
+max_outfall_distance_m = 1500.0  # keep a cluster if any pixel is within this distance of an outfall
 
 # Spatial settings in meters / square meters (converted to pixels below)
 smooth_window_m = 50.0         # low-pass filter window width
@@ -66,7 +66,23 @@ min_object_area_m2 = 30000.0   # drop patches smaller than this
 dilate_radius_m = 30.0         # final dilation buffer
 
 
-def process_image(image_path, mask_path, prob_path, qc_path):
+with rasterio.open(water_mask_path) as _src:
+    WATER = _src.read(1) == 1
+    WATER_TRANSFORM, WATER_CRS = _src.transform, _src.crs
+
+
+def water_on_grid(shape, transform, crs):
+    """Step 05 water mask on a scene's pixel grid (same logic as step 05: resampled,
+    nearest neighbour, when a scene's grid differs; outside the reference = not water)."""
+    if shape == WATER.shape and transform == WATER_TRANSFORM:
+        return WATER
+    out = np.zeros(shape, dtype='uint8')
+    reproject(WATER.astype('uint8'), out, src_transform=WATER_TRANSFORM, src_crs=WATER_CRS,
+              dst_transform=transform, dst_crs=crs, resampling=Resampling.nearest)
+    return out.astype(bool)
+
+
+def process_image(image_path, mask_path, qc_path):
     # 1. Read the turbidity raster (land/no data = NaN)
     with rasterio.open(image_path) as src:
         turb = src.read(1).astype(np.float32)
@@ -95,36 +111,35 @@ def process_image(image_path, mask_path, prob_path, qc_path):
     clean = remove_small_objects(clean, min_size=m2_to_px(min_object_area_m2))
     mask = binary_dilation(clean, disk(m_to_px(dilate_radius_m)))
 
+    # 3b. Clip to the water mask from step 05 (on this scene's grid)
+    water = water_on_grid(turb.shape, transform, crs)
+    mask &= water
+
     # 4. Distance (meters) from every pixel to the nearest outfall
     outfalls = gpd.read_file(outfall_shapefile).to_crs(crs)
     outfall_r = rasterize([(g, 1) for g in outfalls.geometry], out_shape=turb.shape,
                           transform=transform, fill=0, dtype='uint8')
     dist_m = distance_transform_edt(outfall_r == 0) * px
 
-    # 5. Exponential decay probability
-    prob_full = np.exp(-dist_m / decay_scale).astype(np.float32)
+    if not outfall_r.any():
+        raise ValueError(f'No outfall from {outfall_shapefile} falls inside {image_path.name}')
 
-    # 6. Label clusters, give each its highest probability, keep the likely ones
+    # 5. Label clusters; keep those with any pixel within max_outfall_distance_m of an outfall
     labels, n_clusters = label(mask)
-    prob_map = np.zeros(turb.shape, dtype=np.float32)
     mask_selected = np.zeros(turb.shape, dtype=bool)
     n_accepted = 0
     if n_clusters > 0:
         ids = np.arange(1, n_clusters + 1)
-        cluster_prob = np.asarray(maximum(prob_full, labels, index=ids), dtype=np.float32)
-        prob_map = np.concatenate([[0], cluster_prob])[labels].astype(np.float32)
-        accepted = ids[cluster_prob >= cluster_prob_threshold]
+        cluster_dist = np.asarray(minimum(dist_m, labels, index=ids), dtype=np.float32)
+        accepted = ids[cluster_dist <= max_outfall_distance_m]
         n_accepted = len(accepted)
         mask_selected = np.isin(labels, accepted)
 
-    # 7. Write the plume mask and the cluster probability map
+    # 6. Write the plume mask
     out_profile = profile.copy()
     out_profile.update(count=1, dtype='uint8', nodata=0, compress='deflate')
     with rasterio.open(mask_path, 'w', **out_profile) as dst:
         dst.write(mask_selected.astype('uint8'), 1)
-    out_profile.update(dtype='float32')
-    with rasterio.open(prob_path, 'w', **out_profile) as dst:
-        dst.write(prob_map, 1)
 
     area_km2 = mask_selected.sum() * px * px / 1e6
     print(f'  plume area: {area_km2:.2f} km2 ({n_accepted} of {n_clusters} clusters kept)')
@@ -138,12 +153,6 @@ def process_image(image_path, mask_path, prob_path, qc_path):
     # Panel 1: turbidity, with pixels that have no value shown as above / below the scale
     vmax = 3 * threshold
     disp = turb.copy()
-    water = np.zeros(turb.shape, dtype=bool)
-    if water_mask_path.exists():
-        with rasterio.open(water_mask_path) as src:
-            wm = src.read(1)
-        if wm.shape == turb.shape:
-            water = wm == 1
     stem = image_path.name.replace('_TURB.tif', '')
     refl_path = reflectance_dir / f'{stem}_reflectance.tif'
     below = above_sat = np.zeros(turb.shape, dtype=bool)
@@ -177,9 +186,10 @@ def process_image(image_path, mask_path, prob_path, qc_path):
     axes[0, 1].set_title(f'2. Turbidity >= {threshold:g} FNU\n{signal.sum():,} px')
     axes[0, 2].imshow(mask, cmap='gray')
     axes[0, 2].set_title(f'3. After morphology\n{mask.sum():,} px')
-    im = axes[1, 0].imshow(prob_full, cmap='inferno', vmin=0, vmax=1)
+    im = axes[1, 0].imshow(dist_m / 1000, cmap='inferno_r', vmin=0, vmax=3 * max_outfall_distance_m / 1000)
+    axes[1, 0].contour(dist_m, levels=[max_outfall_distance_m], colors='cyan', linewidths=1)
     axes[1, 0].scatter(xs, ys, c='cyan', s=15, edgecolor='k')
-    axes[1, 0].set_title(f'4. Outfall decay probability (scale {decay_scale:.0f} m)')
+    axes[1, 0].set_title(f'4. Distance to outfall (km); cyan = {max_outfall_distance_m / 1000:g} km')
     fig.colorbar(im, ax=axes[1, 0], fraction=0.046)
     axes[1, 1].imshow(labels, cmap='nipy_spectral', interpolation='nearest')
     axes[1, 1].set_title(f'5. Clusters (n={n_clusters}, {n_accepted} accepted)')
@@ -212,18 +222,17 @@ def main():
         if src_path.name.startswith('._'):     # macOS metadata files on external drives
             continue
         mask_path = output_dir / src_path.name.replace('_TURB.tif', '_TURB_mask.tif')
-        prob_path = output_dir / src_path.name.replace('_TURB.tif', '_TURB_prob.tif')
         qc_path = qc_dir / src_path.name.replace('_TURB.tif', '_TURB_qc.png')
         m = re.search(r'(\d{8}T\d{6})', src_path.name)
         if good is not None and not (m and m.group(1) in good):
             qc_path = None                     # not rated 3: no QC figure
 
-        if mask_path.exists() and prob_path.exists() and (qc_path is None or qc_path.exists()):
+        if mask_path.exists() and (qc_path is None or qc_path.exists()):
             print(f'Skipping {src_path.name} (already done)')
             continue
 
         print(f'Processing {src_path.name}')
-        process_image(src_path, mask_path, prob_path, qc_path)
+        process_image(src_path, mask_path, qc_path)
 
     print('Done.')
 

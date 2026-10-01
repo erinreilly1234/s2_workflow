@@ -19,7 +19,7 @@ Scripts run in order. Paths are set near the top of each script and assume the
 | 04 | `04_dn_to_reflectance.py` | mosaics → `03_mosaics_2022_2025_reflectance/` | DN → bottom-of-atmosphere reflectance: `(DN − 1000) / 10000`. NoData (DN 0) → NaN. |
 | 05 | `05_compute_turbidity.py` | reflectance → `05_TURB/`, `water_mask_<date>.tif` | Computes Nechad turbidity (FNU) over water using one fixed water mask (see below). The earlier version that also wrote `05_NDTI/` and `05_NDCI/` is `_archive/05_compute_ndti_ndci_full.py`. |
 | 05b | `05b_qc_figures.py` | reflectance + NDTI (from `_archive/05_compute_ndti_ndci_full.py`) → `06_QC/` | QC figures per date (true colour, spectral profiles at two points, NDTI map and histogram), an all-dates overview and `QC_stats.csv`. |
-| 06 | `06_turbidity_plumes.py` | `05_TURB/` → `06_TURB_plumes/` | Main plume step: smooths turbidity, thresholds at 10 FNU, cleans the mask with morphology, and keeps clusters near the outfalls (`shapefiles/Outflow.shp`; exp(−d / 4000 m) ≥ 0.7, i.e. within ~1.4 km). Writes `_TURB_mask.tif`, `_TURB_prob.tif` and a 6-panel QC figure per date. |
+| 06 | `06_turbidity_plumes.py` | `05_TURB/` → `06_TURB_plumes/` | Main plume step: smooths turbidity, thresholds at 10 FNU, cleans the mask with morphology, and clips to the step 05 water mask, and keeps clusters with any pixel within 1.5 km of an outfall (`shapefiles/Outflow.shp`). Writes `_TURB_mask.tif` per date, plus a 6-panel QC figure for dates rated 3. |
 | 06 (older) | `06_isegprob_ndti*.py`, `06_isegprob_ndti_tuning.ipynb` | NDTI → plume masks | Earlier NDTI-based versions of the same segmentation. |
 
 Step 03 example:
