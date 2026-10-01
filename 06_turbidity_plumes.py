@@ -13,8 +13,9 @@ Same steps as 06_isegprob_ndti_926_2.py, applied to turbidity:
   5. distance from each pixel to the nearest outfall (meters)
   6. label clusters (4-connected); keep a cluster if any of its pixels lies
      within max_outfall_distance_m (1.5 km) of an outfall
-Output per scene: plume mask (_TURB_mask.tif), plus a 6-panel QC figure (qc_pngs/). QC figures are made only
-for S2 dates rated 3 (cloud-free) in RATINGS_CSV when QC_RATING_3_ONLY is True.
+Output per scene: plume mask (_TURB_mask.tif) and a 6-panel QC figure (qc_pngs/). Only S2 dates rated 3
+(cloud-free) in RATINGS_CSV are processed when RATING_3_ONLY is True; other dates
+are skipped entirely (no mask, no QC figure).
 
 QC panel 1 colours pixels that have no turbidity value, using the red reflectance
 from step 04 and the water mask from step 05:
@@ -50,7 +51,7 @@ outfall_shapefile = '/home/jovyan/s2/shapefiles/Outflow.shp'
 reflectance_dir = Path('/home/jovyan/s2/03_mosaics_2022_2025_reflectance')   # step 04 output
 water_mask_path = Path('/home/jovyan/s2/water_mask_20240825.tif')           # step 05 output
 RATINGS_CSV = Path('/home/jovyan/s2/all_s1_s2_dates_for_rating.csv')
-QC_RATING_3_ONLY = True        # QC figures only for S2 dates rated 3 (cloud-free)
+RATING_3_ONLY = True           # process only S2 dates rated 3 (cloud-free)
 TURB_C = 0.2324                # same C as step 05 (red reflectance >= C has no turbidity)
 
 threshold = 10.0               # turbidity (FNU) at or above this counts as turbid water
@@ -215,19 +216,19 @@ def rated_3_keys():
 
 def main():
     qc_dir.mkdir(parents=True, exist_ok=True)
-    good = rated_3_keys() if QC_RATING_3_ONLY else None
+    good = rated_3_keys() if RATING_3_ONLY else None
     if good is not None:
-        print(f'QC figures only for the {len(good)} S2 dates rated 3')
+        print(f'Processing only the {len(good)} S2 dates rated 3')
     for src_path in sorted(input_dir.glob('*_TURB.tif')):
         if src_path.name.startswith('._'):     # macOS metadata files on external drives
             continue
-        mask_path = output_dir / src_path.name.replace('_TURB.tif', '_TURB_mask.tif')
-        qc_path = qc_dir / src_path.name.replace('_TURB.tif', '_TURB_qc.png')
         m = re.search(r'(\d{8}T\d{6})', src_path.name)
         if good is not None and not (m and m.group(1) in good):
-            qc_path = None                     # not rated 3: no QC figure
+            continue                           # not rated 3: skip this date
+        mask_path = output_dir / src_path.name.replace('_TURB.tif', '_TURB_mask.tif')
+        qc_path = qc_dir / src_path.name.replace('_TURB.tif', '_TURB_qc.png')
 
-        if mask_path.exists() and (qc_path is None or qc_path.exists()):
+        if mask_path.exists() and qc_path.exists():
             print(f'Skipping {src_path.name} (already done)')
             continue
 
