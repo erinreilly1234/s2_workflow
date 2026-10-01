@@ -33,6 +33,7 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+from rasterio.warp import reproject, Resampling
 
 input_dir = Path("/home/jovyan/s2/03_mosaics_2022_2025_reflectance")
 ndti_dir = Path("/home/jovyan/s2/05_NDTI")
@@ -72,6 +73,20 @@ mask_profile.update(count=1, dtype="uint8", nodata=255, compress="deflate")
 with rasterio.open(ndti_dir.parent / f"water_mask_{WATER_MASK_DATE}.tif", "w", **mask_profile) as dst:
     dst.write(water.astype("uint8"), 1)
 
+def water_on_grid(shape, transform, crs):
+    """The water mask on a scene's own pixel grid. Mosaics normally share the
+    reference grid; a scene with a different extent (e.g. a partial acquisition
+    clipped to a smaller area) gets the mask resampled onto its grid
+    (nearest neighbour; outside the reference extent = not water)."""
+    if shape == water.shape and transform == mask_profile["transform"]:
+        return water
+    out = np.zeros(shape, dtype="uint8")
+    reproject(water.astype("uint8"), out,
+              src_transform=mask_profile["transform"], src_crs=mask_profile["crs"],
+              dst_transform=transform, dst_crs=crs, resampling=Resampling.nearest)
+    return out.astype(bool)
+
+
 for src_path in sorted(input_dir.glob("*.tif")):
     ndti_path = ndti_dir / src_path.name.replace("_reflectance.tif", "_NDTI.tif")
     ndci_path = ndci_dir / src_path.name.replace("_reflectance.tif", "_NDCI.tif")
@@ -90,9 +105,11 @@ for src_path in sorted(input_dir.glob("*.tif")):
         nir = src.read(8)     # B08
         profile = src.profile
 
-    if green.shape != water.shape:
-        raise ValueError(f"{src_path.name} grid {green.shape} != water mask grid {water.shape}")
-    land = ~water | ~np.isfinite(green) | ~np.isfinite(red)
+    scene_water = water_on_grid(green.shape, profile["transform"], profile["crs"])
+    if scene_water is not water:
+        print(f"  note: grid {green.shape} differs from the water-mask grid {water.shape}; "
+              f"mask resampled onto this scene")
+    land = ~scene_water | ~np.isfinite(green) | ~np.isfinite(red)
 
     ndti = normalized_difference(red, green)
     ndci = normalized_difference(b05, red)
