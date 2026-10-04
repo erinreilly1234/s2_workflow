@@ -87,7 +87,7 @@ python 03_merge_tifs_subset.py \
 ## Results and figures
 
 Figures come after the workflow, so their scripts are not in this repo: they
-live in `010_optical/08_figures/`, next to the figures they make
+live in `010_optical/08_figures/` (a separate git repo with its own README), next to the figures they make
 (`results/` for the results figures, `checks/` for the per-scene checking
 images). Each script is standalone: open it and read it top to bottom (file
 locations, settings, load, calculate, plot). Run `07_measure_plumes.py` first;
