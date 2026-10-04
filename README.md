@@ -27,7 +27,7 @@ flowchart TD
     pairs[("matched_pairs_reviewed.csv<br/>same-day S1/S2 pairs")] --> s07
     s07 --> areas[/"plume_areas_s1_s2.csv"/]
     s07 --> matched[/"matched_pairs_with_areas.csv"/]
-    areas --> figs["figures/<br/>(see Results and figures)"]
+    areas --> figs["010_optical/08_figures/<br/>(see Results and figures)"]
     matched --> figs
 
     classDef data fill:#eef3f8,stroke:#6b8bb0;
@@ -40,6 +40,27 @@ Cylinders are inputs from outside this repo, boxes are scripts, slanted boxes
 are the CSVs that the figure scripts read, and rounded boxes are figures. The
 diagrams render on GitHub; PNG copies are in `docs/` for viewing offline.
 
+## Folder layout (`/Volumes/External/TJ/010_optical/`)
+
+```
+010_optical/
+├── s2_workflow/              this repo: steps 01–07 (code only)
+├── 02_mosaics_2022_2025/     step 03 output: clipped DN mosaics
+├── 03_mosaics_…_reflectance.tar.gz   step 04 output (packed)
+├── 05_TURB/                  step 05 output: turbidity (FNU)
+├── 06_TURB_plumes/           step 06 output: S2 plume masks, QC PNGs, 06_summary.csv
+├── 07_plume_measurements/    step 07 output: plume_areas_s1_s2.csv, matched_pairs_with_areas.csv
+├── 08_figures/               after the workflow: figure scripts and their outputs
+│   ├── results/              results figures (scripts + PNGs)
+│   └── checks/               per-scene overlays and the S1/S2 pairs viewer (scripts + outputs)
+├── water_mask_20240825.tif   step 05: fixed water mask (also the S2 reference grid)
+└── __archive/                old runs
+```
+
+S1 masks (`TJ/040_segoutput/`), the rating and pair spreadsheets
+(`TJ/__spreadsheets/`), river flow and rainfall (`TJ/011_environmentalData/`) and
+the outfall shapefile (`TJ/015_shapefiles/`) live outside `010_optical/`.
+
 ## Steps
 
 | Step | Script | Input → output | What it does |
@@ -51,7 +72,7 @@ diagrams render on GitHub; PNG copies are in `docs/` for viewing offline.
 | 05 | `05_compute_turbidity.py` | reflectance → `05_TURB/`, `water_mask_<date>.tif` | Computes Nechad turbidity (FNU) over water using one fixed water mask (see below). The earlier version that also wrote `05_NDTI/` and `05_NDCI/` is `_archive/05_compute_ndti_ndci_full.py`. |
 | 05b | `05b_qc_figures.py` | reflectance + NDTI (from `_archive/05_compute_ndti_ndci_full.py`) → `06_QC/` | QC figures per date (true colour, spectral profiles at two points, NDTI map and histogram), an all-dates overview and `QC_stats.csv`. |
 | 06 | `06_turbidity_plumes.py` | `05_TURB/` → `06_TURB_plumes/` | Main plume step, on S2 dates rated 3 only: skips hazy dates (median B08 over water > 0.10), masks cloud pixels (B08 > 0.05), smooths turbidity (50 m), marks water ≥ 5 FNU above that date's median water turbidity (per Sentinel-2 tile, outside a 150 m surf zone), cleans up with morphology, and keeps patches within 1.5 km of an outfall. Writes `_TURB_mask.tif`, a 6-panel QC figure per date and `06_summary.csv`. The method is listed step by step at the top of the script. |
-| 07 | `07_measure_plumes.py` | S2 masks (step 06) + S1 masks + ratings + matched pairs → `07_figures/plume_areas_s1_s2.csv`, `07_figures/matched_pairs_with_areas.csv` | Calculations only, no figures. Measures the plume area (km²) of every S1 mask and every cloud-free (rating 3) S2 mask. For each same-day S1/S2 pair, puts both masks on the S2 grid and records both areas, the distance between plume centres and the mask overlap (IoU). The figure scripts in `figures/` read these two CSVs. |
+| 07 | `07_measure_plumes.py` | S2 masks (step 06) + S1 masks + ratings + matched pairs → `07_plume_measurements/plume_areas_s1_s2.csv`, `07_plume_measurements/matched_pairs_with_areas.csv` | Calculations only, no figures. Measures the plume area (km²) of every S1 mask and every cloud-free (rating 3) S2 mask. For each same-day S1/S2 pair, puts both masks on the S2 grid and records both areas, the distance between plume centres and the mask overlap (IoU). The figure scripts in `010_optical/08_figures/` read these two CSVs. |
 | 06 (older) | `06_isegprob_ndti*.py`, `06_isegprob_ndti_tuning.ipynb` | NDTI → plume masks | Earlier NDTI-based versions of the same segmentation. |
 
 Step 03 example:
@@ -65,10 +86,13 @@ python 03_merge_tifs_subset.py \
 
 ## Results and figures
 
-Every figure has its own script in `figures/`. Each one is standalone: open it
-and read it top to bottom (file locations, settings, load, calculate, plot). Run
-`07_measure_plumes.py` first; the figure scripts only read its CSVs and the
-original masks. Each script saves its PNG (or HTML) next to itself in `figures/`.
+Figures come after the workflow, so their scripts are not in this repo: they
+live in `010_optical/08_figures/`, next to the figures they make
+(`results/` for the results figures, `checks/` for the per-scene checking
+images). Each script is standalone: open it and read it top to bottom (file
+locations, settings, load, calculate, plot). Run `07_measure_plumes.py` first;
+the figure scripts only read its CSVs and the original masks, and each one saves
+its output next to itself.
 
 ```mermaid
 flowchart LR
@@ -92,7 +116,7 @@ flowchart LR
     class areas,matched out;
 ```
 
-### Results figures
+### Results figures (`08_figures/results/`)
 
 | Figure | Script | Reads | What it shows |
 |---|---|---|---|
@@ -113,7 +137,7 @@ the script):
   beach bacteria TMDLs), **or** daily Tijuana River flow above 100 MGD (about the
   90th percentile of 2022–2025 daily flow). Bands are context only.
 
-### Checking figures
+### Checking figures (`08_figures/checks/`)
 
 Per-scene images for checking the masks by eye; not used in the results.
 
@@ -142,15 +166,17 @@ flowchart LR
 ### Run order
 
 ```bash
-python 07_measure_plumes.py                    # after step 06; writes the two CSVs
-python figures/plume_area_timeseries_figure.py
-python figures/s1_s2_agreement_figure.py
-python figures/plume_frequency_figure.py
+cd /Volumes/External/TJ/010_optical
+python s2_workflow/07_measure_plumes.py                 # after step 06; writes the two CSVs
+python 08_figures/results/plume_area_timeseries_figure.py
+python 08_figures/results/s1_s2_agreement_figure.py
+python 08_figures/results/plume_frequency_figure.py
+python 08_figures/checks/s1_s2_pairs_viewer.py          # also makes any missing overlay PNGs
 ```
 
 The figure from the earlier all-in-one script (`fig_area_flow_by_year.png`, one
 panel per year with flow and rain axes) was retired after review; that script is
-kept locally as `_archive/07_results_figures.py`.
+kept locally as `s2_workflow/_archive/07_results_figures.py`.
 
 ## Band order in the mosaics
 

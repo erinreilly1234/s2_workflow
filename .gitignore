@@ -11,10 +11,3 @@ archive/
 
 # Python bytecode
 __pycache__/
-
-# Figure PNGs written by figures/ scripts
-figures/*/
-figures/*.html
-
-# Figure PNGs written next to the figure scripts
-figures/*.png

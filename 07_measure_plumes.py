@@ -4,15 +4,15 @@
 
 Step 07 of the workflow. Measures every plume mask (S1 and S2) and compares the
 S1 and S2 masks of matched same-day pairs. This step only calculates numbers;
-the figures are made by the scripts in figures/ (see the README).
+the figures are made by the scripts in 010_optical/08_figures/ (see the README).
 
     S2 plume masks (step 06) ─┐
     S1 plume masks (SAR)     ─┼─► plume_areas_s1_s2.csv        one row per mask
     S2 rating spreadsheet    ─┤
     matched S1/S2 pairs      ─┴─► matched_pairs_with_areas.csv one row per pair
 
-Outputs (written to 010_optical/07_figures/)
--------------------------------------------
+Outputs (written to 010_optical/07_plume_measurements/)
+------------------------------------------------------
 plume_areas_s1_s2.csv
     Sensor, Timestamp (UTC), Area_km2, File
     Area of every mask. Area_km2 = 0 means the mask has no plume pixels.
@@ -55,7 +55,7 @@ if TIDE.exists():
     RATINGS_CSV = TIDE / "all_s1_s2_dates_for_rating.csv"
     PAIRS_CSV   = TIDE / "ancillary" / "matched_pairs_reviewed.csv"
     WATER_MASK  = TIDE / "water_mask_20240825.tif"
-    OUT_DIR     = TIDE / "07_figures"
+    OUT_DIR     = TIDE / "07_plume_measurements"
 else:
     TJ = Path(os.environ.get("TJ_ROOT", "/Volumes/External/TJ"))
     S2_MASK_DIR = TJ / "010_optical" / "06_TURB_plumes"        # *_TURB_mask.tif from step 06
@@ -63,7 +63,7 @@ else:
     RATINGS_CSV = TJ / "__spreadsheets" / "all_s1_s2_dates_for_rating.csv"
     PAIRS_CSV   = TJ / "__spreadsheets" / "matched_pairs_reviewed.csv"
     WATER_MASK  = TJ / "010_optical" / "water_mask_20240825.tif"   # step 05; defines the S2 grid
-    OUT_DIR     = TJ / "010_optical" / "07_figures"
+    OUT_DIR     = TJ / "010_optical" / "07_plume_measurements"
 
 AREAS_OUT = OUT_DIR / "plume_areas_s1_s2.csv"
 PAIRS_OUT = OUT_DIR / "matched_pairs_with_areas.csv"
